@@ -40,6 +40,8 @@ const AppContent = () => {
     availableRepos,
     setAvailableRepos,
     switchRepo,
+    loadServerData,
+    isDatabaseReady,
   } = useAppState();
 
   const graphCanvasRef = useRef<GraphCanvasHandle>(null);
@@ -132,7 +134,7 @@ const AppContent = () => {
     }
   }, [setViewMode, setGraph, setFileContents, setProgress, setProjectName, runPipelineFromFiles, startEmbeddings, initializeAgent]);
 
-  const handleServerConnect = useCallback((result: ConnectToServerResult) => {
+  const handleServerConnect = useCallback(async (result: ConnectToServerResult) => {
     // Extract project name from repoPath
     const repoPath = result.repoInfo.repoPath;
     const projectName = repoPath.split('/').pop() || 'server-project';
@@ -155,6 +157,30 @@ const AppContent = () => {
     }
     setFileContents(fileMap);
 
+    // Load server data into KuzuDB (required for agent/cypher queries)
+    setProgress({ phase: 'extracting', percent: 98, message: 'Loading graph database...', detail: 'Initializing knowledge graph' });
+    const loadResult = await loadServerData(result.nodes, result.relationships, result.fileContents);
+    if (!loadResult.success) {
+      console.error('Failed to load server data into KuzuDB:', loadResult.error);
+      setProgress({
+        phase: 'error', percent: 0,
+        message: 'Failed to load repository',
+        detail: loadResult.error || 'Unknown error loading graph database',
+      });
+      return;
+    }
+    // Verify database is ready
+    const isReady = await isDatabaseReady();
+    if (!isReady) {
+      console.error('Database not ready after loadServerData');
+      setProgress({
+        phase: 'error', percent: 0,
+        message: 'Failed to load repository',
+        detail: 'Database failed to initialize',
+      });
+      return;
+    }
+
     // Transition directly to exploring view
     setViewMode('exploring');
 
@@ -171,7 +197,7 @@ const AppContent = () => {
         console.warn('Embeddings auto-start failed:', err);
       }
     });
-  }, [setViewMode, setGraph, setFileContents, setProjectName, initializeAgent, startEmbeddings]);
+  }, [setViewMode, setGraph, setFileContents, setProjectName, setProgress, loadServerData, isDatabaseReady, initializeAgent, startEmbeddings]);
 
   // Auto-connect when ?server query param is present (bookmarkable shortcut)
   const autoConnectRan = useRef(false);

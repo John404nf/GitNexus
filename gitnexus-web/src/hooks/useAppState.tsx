@@ -1,6 +1,6 @@
 import { createContext, useContext, useState, useCallback, useRef, useEffect, ReactNode } from 'react';
 import * as Comlink from 'comlink';
-import { KnowledgeGraph, GraphNode, NodeLabel } from '../core/graph/types';
+import { KnowledgeGraph, GraphNode, GraphRelationship, NodeLabel } from '../core/graph/types';
 import { PipelineProgress, PipelineResult, deserializePipelineResult } from '../types/pipeline';
 import { createKnowledgeGraph } from '../core/graph/graph';
 import { DEFAULT_VISIBLE_LABELS } from '../lib/constants';
@@ -138,6 +138,13 @@ interface AppState {
 
   // Debug/test methods
   testArrayParams: () => Promise<{ success: boolean; error?: string }>;
+
+  // Server connection - load server data into KuzuDB
+  loadServerData: (
+    nodes: GraphNode[],
+    relationships: GraphRelationship[],
+    fileContents: Record<string, string>
+  ) => Promise<{ success: boolean; error?: string }>;
 
   // LLM/Agent state
   llmSettings: LLMSettings;
@@ -550,6 +557,17 @@ export const AppStateProvider = ({ children }: { children: ReactNode }) => {
     const api = apiRef.current;
     if (!api) return { success: false, error: 'Worker not initialized' };
     return api.testArrayParams();
+  }, []);
+
+  // Load server data into KuzuDB
+  const loadServerData = useCallback(async (
+    nodes: GraphNode[],
+    relationships: GraphRelationship[],
+    fileContents: Record<string, string>
+  ): Promise<{ success: boolean; error?: string }> => {
+    const api = apiRef.current;
+    if (!api) return { success: false, error: 'Worker not initialized' };
+    return api.loadServerData(nodes, relationships, fileContents);
   }, []);
 
   // LLM methods
@@ -1017,6 +1035,40 @@ export const AppStateProvider = ({ children }: { children: ReactNode }) => {
       for (const [p, c] of Object.entries(result.fileContents)) fileMap.set(p, c);
       setFileContents(fileMap);
 
+      // Load server data into KuzuDB for agent queries
+      const api = apiRef.current;
+      if (!api) {
+        console.error('Worker not ready - cannot load server data');
+        setProgress({
+          phase: 'error', percent: 0,
+          message: 'Failed to load repository',
+          detail: 'Worker not ready. Please refresh and try again.',
+        });
+        return;
+      }
+      setProgress({ phase: 'extracting', percent: 98, message: 'Loading graph database...', detail: 'Initializing knowledge graph' });
+      const loadResult = await api.loadServerData(result.nodes, result.relationships, result.fileContents);
+      if (!loadResult.success) {
+        console.error('Failed to load server data into KuzuDB:', loadResult.error);
+        setProgress({
+          phase: 'error', percent: 0,
+          message: 'Failed to load repository',
+          detail: loadResult.error || 'Unknown error loading graph database',
+        });
+        return;
+      }
+      // Verify database is ready after loading
+      const isReady = await api.isReady();
+      if (!isReady) {
+        console.error('Database not ready after loadServerData');
+        setProgress({
+          phase: 'error', percent: 0,
+          message: 'Failed to load repository',
+          detail: 'Database failed to initialize',
+        });
+        return;
+      }
+
       setViewMode('exploring');
 
       if (getActiveProviderConfig()) initializeAgent(pName);
@@ -1037,7 +1089,7 @@ export const AppStateProvider = ({ children }: { children: ReactNode }) => {
       });
       setTimeout(() => { setViewMode('exploring'); setProgress(null); }, 3000);
     }
-  }, [serverBaseUrl, setProgress, setViewMode, setProjectName, setGraph, setFileContents, initializeAgent, startEmbeddings, setHighlightedNodeIds, clearAIToolHighlights, clearBlastRadius, setSelectedNode, setQueryResult, setCodeReferences, setCodePanelOpen, setCodeReferenceFocus]);
+  }, [serverBaseUrl, apiRef, setProgress, setViewMode, setProjectName, setGraph, setFileContents, initializeAgent, startEmbeddings, setHighlightedNodeIds, clearAIToolHighlights, clearBlastRadius, setSelectedNode, setQueryResult, setCodeReferences, setCodePanelOpen, setCodeReferenceFocus]);
 
   const removeCodeReference = useCallback((id: string) => {
     setCodeReferences(prev => {
@@ -1151,6 +1203,7 @@ export const AppStateProvider = ({ children }: { children: ReactNode }) => {
     isEmbeddingReady: embeddingStatus === 'ready',
     // Debug
     testArrayParams,
+    loadServerData,
     // LLM/Agent state
     llmSettings,
     updateLLMSettings,

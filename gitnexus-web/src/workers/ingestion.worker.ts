@@ -1,5 +1,6 @@
 import * as Comlink from 'comlink';
 import { runIngestionPipeline, runPipelineFromFiles } from '../core/ingestion/pipeline';
+import { createKnowledgeGraph, type GraphNode, type GraphRelationship } from '../core/graph/graph';
 import { PipelineProgress, SerializablePipelineResult, serializePipelineResult } from '../types/pipeline';
 import { FileEntry } from '../services/zip';
 import {
@@ -241,6 +242,58 @@ const workerApi = {
       return kuzu.getKuzuStats();
     } catch {
       return { nodes: 0, edges: 0 };
+    }
+  },
+
+  /**
+   * Load server data into KuzuDB
+   * Used when connecting to a remote GitNexus CLI server
+   * @param nodes - Graph nodes from server
+   * @param relationships - Graph relationships from server
+   * @param fileContents - File contents from server
+   * @returns Success status
+   */
+  async loadServerData(
+    nodes: GraphNode[],
+    relationships: GraphRelationship[],
+    fileContents: Record<string, string>
+  ): Promise<{ success: boolean; error?: string }> {
+    try {
+      console.log(`📥 loadServerData called: ${nodes.length} nodes, ${relationships.length} relationships`);
+
+      // Get KuzuDB adapter
+      const kuzu = await getKuzuAdapter();
+
+      // Create KnowledgeGraph from raw nodes/relationships
+      const graph = createKnowledgeGraph();
+      for (const node of nodes) {
+        graph.addNode(node);
+      }
+      for (const rel of relationships) {
+        graph.addRelationship(rel);
+      }
+      console.log(`📊 KnowledgeGraph created: ${graph.nodeCount} nodes, ${graph.edgeCount} edges`);
+
+      // Store file contents for grep/read tools
+      storedFileContents = new Map(Object.entries(fileContents));
+      console.log(`📄 Stored ${storedFileContents.size} file contents`);
+
+      // Build BM25 index for keyword search
+      const bm25DocCount = buildBM25Index(storedFileContents);
+      console.log(`🔍 BM25 index built: ${bm25DocCount} documents`);
+
+      // Load graph into KuzuDB
+      await kuzu.loadGraphToKuzu(graph, storedFileContents);
+      console.log('✅ loadGraphToKuzu completed');
+
+      // Verify database is ready
+      const isReady = kuzu.isKuzuReady();
+      console.log(`🗄️ KuzuDB ready: ${isReady}`);
+
+      return { success: true };
+    } catch (err) {
+      console.error('❌ loadServerData failed:', err);
+      return { success: false, error: err instanceof Error ? err.message : 'Unknown error' };
     }
   },
 
