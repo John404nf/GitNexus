@@ -5,9 +5,9 @@
  * All API keys are stored locally - never sent to any server except the LLM provider.
  */
 
-import { 
-  LLMSettings, 
-  DEFAULT_LLM_SETTINGS, 
+import {
+  LLMSettings,
+  DEFAULT_LLM_SETTINGS,
   LLMProvider,
   OpenAIConfig,
   AzureOpenAIConfig,
@@ -15,6 +15,7 @@ import {
   AnthropicConfig,
   OllamaConfig,
   OpenRouterConfig,
+  MiniMaxConfig,
   ProviderConfig,
 } from './types';
 
@@ -245,7 +246,21 @@ export const getActiveProviderConfig = (): ProviderConfig | null => {
         temperature: settings.openrouter.temperature,
         maxTokens: settings.openrouter.maxTokens,
       } as OpenRouterConfig;
-      
+
+    case 'minimax':
+      if (!settings.minimax?.apiKey || settings.minimax.apiKey.trim() === '') {
+        return null;
+      }
+      return {
+        provider: 'minimax',
+        apiKey: settings.minimax.apiKey,
+        model: settings.minimax.model || 'MiniMax-M2.5',
+        baseUrl: settings.minimax.baseUrl || 'https://api.minimaxi.com/v1',
+        apiMode: settings.minimax.apiMode || 'openai',
+        temperature: settings.minimax.temperature,
+        maxTokens: settings.minimax.maxTokens,
+      } as MiniMaxConfig;
+
     default:
       return null;
   }
@@ -282,6 +297,8 @@ export const getProviderDisplayName = (provider: LLMProvider): string => {
       return 'Ollama (Local)';
     case 'openrouter':
       return 'OpenRouter';
+    case 'minimax':
+      return 'MiniMax';
     default:
       return provider;
   }

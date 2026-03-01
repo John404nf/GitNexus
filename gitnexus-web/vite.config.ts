@@ -50,6 +50,39 @@ export default defineConfig({
     fs: {
       allow: ['..'],
     },
+    // Proxy configuration for LLM API calls to avoid CORS
+    proxy: {
+      // MiniMax Anthropic-compatible proxy (/api/minimax/anthropic/* -> https://api.minimaxi.com/anthropic/*)
+      '/api/minimax/anthropic': {
+        target: 'https://api.minimaxi.com',
+        changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/api\/minimax\/anthropic/, '/anthropic'),
+      },
+      // MiniMax OpenAI-compatible proxy (/api/minimax/v1/* -> https://api.minimaxi.com/v1/*)
+      '/api/minimax/v1': {
+        target: 'https://api.minimaxi.com',
+        changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/api\/minimax\/v1/, '/v1'),
+      },
+      // OpenAI proxy
+      '/api/openai': {
+        target: 'https://api.openai.com',
+        changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/api\/openai/, ''),
+      },
+      // OpenRouter proxy
+      '/api/openrouter': {
+        target: 'https://openrouter.ai/api',
+        changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/api\/openrouter/, ''),
+      },
+      // Ollama proxy (for local development)
+      '/api/ollama': {
+        target: 'http://localhost:11434',
+        changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/api\/ollama/, ''),
+      },
+    },
   },
   // Also set for preview/production builds
   preview: {

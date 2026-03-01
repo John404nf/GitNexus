@@ -13,14 +13,15 @@ import { ChatAnthropic } from '@langchain/anthropic';
 import { ChatOllama } from '@langchain/ollama';
 import type { BaseChatModel } from '@langchain/core/language_models/chat_models';
 import { createGraphRAGTools } from './tools';
-import type { 
-  ProviderConfig, 
+import type {
+  ProviderConfig,
   OpenAIConfig,
-  AzureOpenAIConfig, 
+  AzureOpenAIConfig,
   GeminiConfig,
   AnthropicConfig,
   OllamaConfig,
   OpenRouterConfig,
+  MiniMaxConfig,
   AgentStreamChunk,
 } from './types';
 import { 
@@ -49,6 +50,10 @@ import {
  * 5. [Dynamic context appended at end]
  */
 export const BASE_SYSTEM_PROMPT = `You are Nexus, a Code Analysis Agent with access to a Knowledge Graph. Your responses MUST be grounded.
+
+## 🌐 LANGUAGE / 语言
+You MUST respond in Simplified Chinese (简体中文). All your responses, including code comments and explanations, should be in Chinese.
+你必须使用简体中文回复，包括代码注释和解释说明。
 
 ## ⚠️ MANDATORY: GROUNDING
 Every factual claim MUST include a citation.
@@ -197,7 +202,7 @@ export const createChatModel = (config: ProviderConfig): BaseChatModel => {
     
     case 'openrouter': {
       const openRouterConfig = config as OpenRouterConfig;
-      
+
       // Debug logging
       if (import.meta.env.DEV) {
         console.log('🌐 OpenRouter config:', {
@@ -207,11 +212,11 @@ export const createChatModel = (config: ProviderConfig): BaseChatModel => {
           baseUrl: openRouterConfig.baseUrl,
         });
       }
-      
+
       if (!openRouterConfig.apiKey || openRouterConfig.apiKey.trim() === '') {
         throw new Error('OpenRouter API key is required but was not provided');
       }
-      
+
       return new ChatOpenAI({
         openAIApiKey: openRouterConfig.apiKey,
         apiKey: openRouterConfig.apiKey, // Fallback for some versions
@@ -225,7 +230,71 @@ export const createChatModel = (config: ProviderConfig): BaseChatModel => {
         streaming: true,
       });
     }
-    
+
+    case 'minimax': {
+      const minimaxConfig = config as MiniMaxConfig;
+      const apiMode = minimaxConfig.apiMode ?? 'openai';
+
+      // Debug logging
+      if (import.meta.env.DEV) {
+        console.log('🔵 MiniMax config:', {
+          hasApiKey: !!minimaxConfig.apiKey,
+          apiKeyLength: minimaxConfig.apiKey?.length || 0,
+          model: minimaxConfig.model,
+          baseUrl: minimaxConfig.baseUrl,
+          apiMode,
+        });
+      }
+
+      if (!minimaxConfig.apiKey || minimaxConfig.apiKey.trim() === '') {
+        throw new Error('MiniMax API key is required but was not provided');
+      }
+
+      // Determine the base URL based on API mode
+      // Use proxy in development to avoid CORS, direct URL in production
+      const isDev = import.meta.env.DEV;
+
+      // Get origin - works in both browser and worker (self.location)
+      const getOrigin = (): string => {
+        if (typeof window !== 'undefined') {
+          return window.location.origin;
+        }
+        // Web Worker environment
+        if (typeof self !== 'undefined' && self.location) {
+          return self.location.origin;
+        }
+        // Fallback - default Vite dev server port
+        return 'http://localhost:5173';
+      };
+
+      let baseUrl: string;
+      if (apiMode === 'anthropic') {
+        // Anthropic-compatible API: https://api.minimaxi.com/anthropic
+        // In dev, use full URL to avoid "Invalid URL" error
+        baseUrl = isDev
+          ? `${getOrigin()}/api/minimax/anthropic`
+          : (minimaxConfig.baseUrl ?? 'https://api.minimaxi.com') + '/anthropic';
+      } else {
+        // OpenAI-compatible API: https://api.minimaxi.com/v1
+        baseUrl = isDev
+          ? `${getOrigin()}/api/minimax/v1`
+          : (minimaxConfig.baseUrl ?? 'https://api.minimaxi.com') + '/v1';
+      }
+
+      return new ChatOpenAI({
+        openAIApiKey: minimaxConfig.apiKey,
+        apiKey: minimaxConfig.apiKey,
+        modelName: minimaxConfig.model,
+        temperature: minimaxConfig.temperature ?? 0.1,
+        maxTokens: minimaxConfig.maxTokens,
+        configuration: {
+          apiKey: minimaxConfig.apiKey,
+          baseURL: baseUrl,
+        },
+        streaming: true,
+      });
+    }
+
     default:
       throw new Error(`Unsupported provider: ${(config as any).provider}`);
   }
